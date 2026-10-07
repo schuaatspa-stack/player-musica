@@ -2,6 +2,7 @@ import pygame
 import os
 import yt_dlp
 import customtkinter as ctk
+from PIL import Image
 
 class PlayerDeMusica:
     def __init__(self):
@@ -12,11 +13,19 @@ class PlayerDeMusica:
         self.esta_pausado = False
         self.volume = 0.5
         pygame.mixer.music.set_volume(self.volume)
+        self.duracao_total = 0
+        self.posicao_inicial_segundos = 0
 
     def carregar_musica(self, caminho_da_musica):
         if os.path.exists(caminho_da_musica):
             self.faixa_atual = caminho_da_musica
             pygame.mixer.music.load(self.faixa_atual)
+            try:
+                audio = pygame.mixer.Sound(self.faixa_atual)
+                self.duracao_total = audio.get_length()
+            except:
+                self.duracao_total = 0
+            self.posicao_inicial_segundos = 0
 
     def carregar_do_youtube(self, busca):
         pasta_destino = "musica"
@@ -31,6 +40,7 @@ class PlayerDeMusica:
         ydl_opts = {
             'format': 'bestaudio/best',
             'outtmpl': os.path.join(pasta_destino, '%(title)s.%(ext)s'), 
+            'writethumbnail': True,
             'postprocessors': [{
                 'key': 'FFmpegExtractAudio',
                 'preferredcodec': 'mp3',
@@ -54,9 +64,8 @@ class PlayerDeMusica:
             print(f"Erro no YouTube: {e}")
 
     def tocar(self):
-        if self.faixa_atual is None:
-            return
-        pygame.mixer.music.play()
+        if self.faixa_atual is None: return
+        pygame.mixer.music.play(start=self.posicao_inicial_segundos)
         self.esta_tocando = True
         self.esta_pausado = False
 
@@ -74,14 +83,14 @@ class PlayerDeMusica:
         pygame.mixer.music.stop()
         self.esta_tocando = False
         self.esta_pausado = False
+        self.posicao_inicial_segundos = 0
 
-    def obter_tempo_atual(self):
-        if self.esta_tocando:
-            tempo_ms = pygame.mixer.music.get_pos()
-            if tempo_ms > 0:
-                seg_totais = tempo_ms // 1000
-                return f"{seg_totais // 60:02d}:{seg_totais % 60:02d}"
-        return "00:00"
+    def buscar_posicao(self, segundos):
+        if self.faixa_atual:
+            self.posicao_inicial_segundos = segundos
+            pygame.mixer.music.play(start=segundos)
+            self.esta_tocando = True
+            self.esta_pausado = False
 
     def avancar_musica(self, pasta="musica"):
         if not self.faixa_atual:
@@ -102,7 +111,6 @@ class PlayerDeMusica:
             self.carregar_musica(os.path.join(pasta, arquivos[prox_indice]))
             self.tocar()
 
-    # NOVO MOTOR: Voltar música
     def voltar_musica(self, pasta="musica"):
         if not self.faixa_atual: return
         arquivos = [f for f in os.listdir(pasta) if f.endswith(".mp3")]
@@ -116,16 +124,13 @@ class PlayerDeMusica:
             self.carregar_musica(os.path.join(pasta, arquivos[prox_indice]))
             self.tocar()
 
-# ==========================================
-# INTERFACE GRÁFICA COMPLETA
-# ==========================================
 class InterfacePlayer(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.player = PlayerDeMusica()
         
         self.title("🎵 Player de Música")
-        self.geometry("550x550")
+        self.geometry("600x750")
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("green")
         
@@ -135,23 +140,42 @@ class InterfacePlayer(ctk.CTk):
         
         self.entry_yt = ctk.CTkEntry(self.frame_yt, placeholder_text="Buscar música no YouTube...")
         self.entry_yt.pack(side="left", fill="x", expand=True, padx=(0, 10))
+        self.entry_yt.bind("<Return>", self.buscar_youtube)
         
-        self.btn_yt = ctk.CTkButton(self.frame_yt, text="Baixar", width=80, command=self.buscar_youtube)
+        self.btn_yt = ctk.CTkButton(self.frame_yt, text="Reproduzir", width=80, command=self.buscar_youtube)
         self.btn_yt.pack(side="right")
         
-        # 2. PLAYLIST (Lista de músicas)
-        self.lbl_playlist = ctk.CTkLabel(self, text="Músicas Locais:", font=("Arial", 14, "bold"))
-        self.lbl_playlist.pack(anchor="w", padx=20)
+        # 2. ESPAÇO PARA A CAPA DO ÁLBUM
+        self.frame_capa = ctk.CTkFrame(self, fg_color="transparent")
+        self.frame_capa.pack(pady=10)
         
-        self.playlist_frame = ctk.CTkScrollableFrame(self, height=150)
-        self.playlist_frame.pack(pady=5, fill="both", expand=True, padx=20)
+        self.lbl_capa = ctk.CTkLabel(self.frame_capa, text="🎵", font=("Arial", 80), width=180, height=180, fg_color="gray20", corner_radius=10)
+        self.lbl_capa.pack()
+
+        # 3. PLAYLIST
+        self.playlist_frame = ctk.CTkScrollableFrame(self, height=120)
+        self.playlist_frame.pack(pady=10, fill="both", expand=True, padx=20)
         self.atualizar_playlist()
         
-        # 3. STATUS DA MÚSICA
-        self.lbl_status = ctk.CTkLabel(self, text="Player Pronto", font=("Arial", 14))
-        self.lbl_status.pack(pady=10)
+        # 4. STATUS
+        self.lbl_status = ctk.CTkLabel(self, text="Player Pronto", font=("Arial", 14, "bold"))
+        self.lbl_status.pack(pady=(10, 0))
+
+        # 5. BARRA DE PROGRESSO
+        self.frame_tempo = ctk.CTkFrame(self, fg_color="transparent")
+        self.frame_tempo.pack(pady=5, fill="x", padx=40)
         
-        # 4. BOTÕES DE CONTROLO (⏮, ▶, ⏸, ⏹, ⏭)
+        self.lbl_tempo_atual = ctk.CTkLabel(self.frame_tempo, text="00:00", width=40)
+        self.lbl_tempo_atual.pack(side="left")
+        
+        self.slider_tempo = ctk.CTkSlider(self.frame_tempo, from_=0, to=100, command=self.buscar_tempo_manual)
+        self.slider_tempo.set(0)
+        self.slider_tempo.pack(side="left", fill="x", expand=True, padx=10)
+        
+        self.lbl_tempo_total = ctk.CTkLabel(self.frame_tempo, text="00:00", width=40)
+        self.lbl_tempo_total.pack(side="right")
+        
+        # 6. BOTÕES
         self.frame_controles = ctk.CTkFrame(self, fg_color="transparent")
         self.frame_controles.pack(pady=5)
         
@@ -170,7 +194,7 @@ class InterfacePlayer(ctk.CTk):
         self.btn_skip = ctk.CTkButton(self.frame_controles, text="⏭", width=40, command=self.acionar_avancar)
         self.btn_skip.pack(side="left", padx=5)
         
-        # 5. CONTROLO DE VOLUME (Slider)
+        # 7. VOLUME
         self.frame_vol = ctk.CTkFrame(self, fg_color="transparent")
         self.frame_vol.pack(pady=15)
         
@@ -178,36 +202,72 @@ class InterfacePlayer(ctk.CTk):
         self.lbl_vol.pack(side="left", padx=5)
         
         self.slider_vol = ctk.CTkSlider(self.frame_vol, from_=0, to=1, command=self.mudar_volume)
-        self.slider_vol.set(0.5) # Começa nos 50%
+        self.slider_vol.set(0.5)
         self.slider_vol.pack(side="left", padx=5)
 
-    # --- Funções que conectam a interface ao motor ---
-    
-    def buscar_youtube(self):
+        self.atualizar_relogio_gui()
+
+    # --- FUNÇÕES ---
+    def atualizar_capa(self):
+        if self.player.faixa_atual:
+            nome_base = os.path.splitext(self.player.faixa_atual)[0]
+            caminhos_img = [nome_base + ".webp", nome_base + ".jpg", nome_base + ".png"]
+            img_encontrada = None
+            
+            for caminho in caminhos_img:
+                if os.path.exists(caminho):
+                    img_encontrada = caminho
+                    break
+            
+            if img_encontrada:
+                img = Image.open(img_encontrada)
+                ctk_img = ctk.CTkImage(img, size=(180, 180))
+                self.lbl_capa.configure(image=ctk_img, text="")
+            else:
+                self.lbl_capa.configure(image="", text="🎵")
+
+    def buscar_youtube(self, event=None):
         busca = self.entry_yt.get()
         if busca:
-            self.lbl_status.configure(text="A descarregar... Aguarde! (A janela pode congelar uns segundos)")
-            self.update() # Força a tela a atualizar antes de começar o download
-            
+            self.lbl_status.configure(text="A processar e reproduzir... Aguarde!")
+            self.update() 
             self.player.carregar_do_youtube(busca)
-            
-            self.lbl_status.configure(text="Download concluído! A tocar...")
+            self.lbl_status.configure(text=f"A tocar: {os.path.basename(self.player.faixa_atual)}")
             self.atualizar_playlist()
+            self.atualizar_capa()
             self.entry_yt.delete(0, 'end')
 
     def mudar_volume(self, valor):
         pygame.mixer.music.set_volume(valor)
         self.player.volume = valor
 
+    def buscar_tempo_manual(self, valor):
+        if self.player.faixa_atual:
+            self.player.buscar_posicao(valor)
+
+    def atualizar_relogio_gui(self):
+        if self.player.esta_tocando and not self.player.esta_pausado:
+            tempo_ms = pygame.mixer.music.get_pos()
+            tempo_atual = self.player.posicao_inicial_segundos + (tempo_ms / 1000)
+            
+            min_atual, seg_atual = int(tempo_atual // 60), int(tempo_atual % 60)
+            self.lbl_tempo_atual.configure(text=f"{min_atual:02d}:{seg_atual:02d}")
+            
+            duracao = self.player.duracao_total
+            if duracao > 0:
+                min_tot, seg_tot = int(duracao // 60), int(duracao % 60)
+                self.lbl_tempo_total.configure(text=f"{min_tot:02d}:{seg_tot:02d}")
+                self.slider_tempo.configure(to=duracao)
+                self.slider_tempo.set(tempo_atual)
+                
+        self.after(1000, self.atualizar_relogio_gui)
+
     def atualizar_playlist(self):
-        # Limpa as músicas antigas da tela
         for widget in self.playlist_frame.winfo_children():
             widget.destroy()
-            
         if os.path.exists("musica"):
             arquivos = [f for f in os.listdir("musica") if f.endswith(".mp3")]
             for arq in arquivos:
-                # Cria um botão invisível para cada música (para poderes clicar nela)
                 btn = ctk.CTkButton(self.playlist_frame, text=arq, anchor="w", fg_color="transparent", 
                                     text_color="white", hover_color="#2ecc71", 
                                     command=lambda m=arq: self.tocar_da_playlist(m))
@@ -219,16 +279,19 @@ class InterfacePlayer(ctk.CTk):
         self.player.carregar_musica(caminho)
         self.player.tocar()
         self.lbl_status.configure(text=f"A tocar: {nome_musica}")
+        self.atualizar_capa()
 
     def acionar_avancar(self):
         self.player.avancar_musica()
         if self.player.faixa_atual:
             self.lbl_status.configure(text=f"A tocar: {os.path.basename(self.player.faixa_atual)}")
+            self.atualizar_capa()
 
     def acionar_voltar(self):
         self.player.voltar_musica()
         if self.player.faixa_atual:
             self.lbl_status.configure(text=f"A tocar: {os.path.basename(self.player.faixa_atual)}")
+            self.atualizar_capa()
 
 if __name__ == "__main__":
     app = InterfacePlayer()

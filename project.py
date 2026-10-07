@@ -1,63 +1,32 @@
 import pygame
 import os
 import yt_dlp
+import customtkinter as ctk
 
 class PlayerDeMusica:
-    """
-    Classe responsável por gerenciar a reprodução de ficheiros de áudio locais
-    e a integração com downloads do YouTube para construção de biblioteca.
-    """
-    
     def __init__(self):
         pygame.init()
         pygame.mixer.init()
-        
         self.faixa_atual = None
         self.esta_tocando = False
         self.esta_pausado = False
-        self.volume = 0.5  # Começa em 50%
-        
+        self.volume = 0.5
         pygame.mixer.music.set_volume(self.volume)
-
-    def aumentar_volume(self):
-        """Aumenta o volume em 10% até o máximo de 100%."""
-        if self.volume < 1.0:
-            self.volume = round(self.volume + 0.1, 1)
-            pygame.mixer.music.set_volume(self.volume)
-            print(f"\n[VOLUME] 🔊 Aumentado para {int(self.volume * 100)}%")
-        else:
-            print("\n[VOLUME] ⚠️ Já está no máximo (100%)")
-
-    def diminuir_volume(self):
-        """Diminui o volume em 10% até o mínimo (mudo)."""
-        if self.volume > 0.0:
-            self.volume = round(self.volume - 0.1, 1)
-            pygame.mixer.music.set_volume(self.volume)
-            print(f"\n[VOLUME] 🔉 Diminuído para {int(self.volume * 100)}%")
-        else:
-            print("\n[VOLUME] 🔇 Já está mudo (0%)")
 
     def carregar_musica(self, caminho_da_musica):
         if os.path.exists(caminho_da_musica):
             self.faixa_atual = caminho_da_musica
             pygame.mixer.music.load(self.faixa_atual)
-            print(f"\n[INFO] Faixa carregada: {self.faixa_atual}")
-        else:
-            print(f"\n[ERRO] Ficheiro não encontrado no caminho: '{caminho_da_musica}'")
 
     def carregar_do_youtube(self, busca):
         pasta_destino = "musica"
-        
         if not os.path.exists(pasta_destino):
             os.makedirs(pasta_destino)
-
         self.parar()
         try:
             pygame.mixer.music.unload()
         except AttributeError:
             pass 
-        
-        print(f"\n[DOWNLOAD] A pesquisar '{busca}' no YouTube... (Isto pode demorar alguns segundos)")
         
         ydl_opts = {
             'format': 'bestaudio/best',
@@ -70,143 +39,197 @@ class PlayerDeMusica:
             'noplaylist': True,
             'quiet': True
         }
-
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(f"ytsearch1:{busca}", download=True)
-                
                 video_info = info['entries'][0]
                 arquivo_bruto = ydl.prepare_filename(video_info)
-                
                 nome_base, _ = os.path.splitext(arquivo_bruto)
                 caminho_final_mp3 = nome_base + ".mp3"
             
             if os.path.exists(caminho_final_mp3):
                 self.carregar_musica(caminho_final_mp3)
                 self.tocar()
-            else:
-                print("\n[ERRO] O ficheiro de áudio não foi encontrado após o download.")
         except Exception as e:
-            print(f"\n[ERRO] Falha na integração com o YouTube: {e}")
+            print(f"Erro no YouTube: {e}")
 
     def tocar(self):
         if self.faixa_atual is None:
-            print("\n[AVISO] Nenhuma faixa carregada no player.")
             return
-        
         pygame.mixer.music.play()
         self.esta_tocando = True
         self.esta_pausado = False
-        print(f"\n[PLAY] Reproduzindo: {self.faixa_atual}")
 
     def pausar(self):
         if self.esta_tocando and not self.esta_pausado:
             pygame.mixer.music.pause()
             self.esta_pausado = True
-            print("\n[PAUSE] Reprodução pausada.")
 
     def retomar(self):
         if self.esta_pausado:
             pygame.mixer.music.unpause()
             self.esta_pausado = False
-            print("\n[PLAY] Reprodução retomada.")
 
     def parar(self):
         pygame.mixer.music.stop()
         self.esta_tocando = False
         self.esta_pausado = False
-        print("\n[STOP] Reprodução interrompida.")
 
+    def obter_tempo_atual(self):
+        if self.esta_tocando:
+            tempo_ms = pygame.mixer.music.get_pos()
+            if tempo_ms > 0:
+                seg_totais = tempo_ms // 1000
+                return f"{seg_totais // 60:02d}:{seg_totais % 60:02d}"
+        return "00:00"
 
-def menu_principal():
-    player = PlayerDeMusica()
-    pasta_padrao = "musica" 
-    
-    while True:
-        status = "Parado"
-        if player.esta_pausado:
-            status = "Pausado"
-        elif player.esta_tocando:
-            status = "Tocando"
+    def avancar_musica(self, pasta="musica"):
+        if not self.faixa_atual:
+            if not os.path.exists(pasta): return
+            arquivos = [f for f in os.listdir(pasta) if f.endswith(".mp3")]
+            if arquivos:
+                self.carregar_musica(os.path.join(pasta, arquivos[0]))
+                self.tocar()
+            return
             
-        print("\n" + "="*45)
-        # O cabeçalho agora mostra o volume dinamicamente (multiplicado por 100 para ficar de 0 a 100%)
-        print(f"🎵 TERMINAL PLAYER - [{status}] | Vol: {int(player.volume * 100)}%")
-        if player.faixa_atual:
-            print(f"Faixa: {player.faixa_atual}")
-        print("="*45)
+        arquivos = [f for f in os.listdir(pasta) if f.endswith(".mp3")]
+        if not arquivos: return
+            
+        nome_atual = os.path.basename(self.faixa_atual)
+        if nome_atual in arquivos:
+            prox_indice = (arquivos.index(nome_atual) + 1) % len(arquivos)
+            self.parar()
+            self.carregar_musica(os.path.join(pasta, arquivos[prox_indice]))
+            self.tocar()
+
+    # NOVO MOTOR: Voltar música
+    def voltar_musica(self, pasta="musica"):
+        if not self.faixa_atual: return
+        arquivos = [f for f in os.listdir(pasta) if f.endswith(".mp3")]
+        if not arquivos: return
+            
+        nome_atual = os.path.basename(self.faixa_atual)
+        if nome_atual in arquivos:
+            indice_atual = arquivos.index(nome_atual)
+            prox_indice = indice_atual - 1 if indice_atual - 1 >= 0 else len(arquivos) - 1
+            self.parar()
+            self.carregar_musica(os.path.join(pasta, arquivos[prox_indice]))
+            self.tocar()
+
+# ==========================================
+# INTERFACE GRÁFICA COMPLETA
+# ==========================================
+class InterfacePlayer(ctk.CTk):
+    def __init__(self):
+        super().__init__()
+        self.player = PlayerDeMusica()
         
-        print("1 - Escolher música local")
-        print("2 - Buscar no YouTube 🌐")
-        print("3 - Play")
-        print("4 - Pause")
-        print("5 - Retomar")
-        print("6 - Stop")
-        print("7 - Aumentar Volume (+)")
-        print("8 - Diminuir Volume (-)")
-        print("0 - Sair")
+        self.title("🎵 Player de Música")
+        self.geometry("550x550")
+        ctk.set_appearance_mode("dark")
+        ctk.set_default_color_theme("green")
+        
+        # 1. BARRA DE PESQUISA YOUTUBE
+        self.frame_yt = ctk.CTkFrame(self, fg_color="transparent")
+        self.frame_yt.pack(pady=15, fill="x", padx=20)
+        
+        self.entry_yt = ctk.CTkEntry(self.frame_yt, placeholder_text="Buscar música no YouTube...")
+        self.entry_yt.pack(side="left", fill="x", expand=True, padx=(0, 10))
+        
+        self.btn_yt = ctk.CTkButton(self.frame_yt, text="Baixar", width=80, command=self.buscar_youtube)
+        self.btn_yt.pack(side="right")
+        
+        # 2. PLAYLIST (Lista de músicas)
+        self.lbl_playlist = ctk.CTkLabel(self, text="Músicas Locais:", font=("Arial", 14, "bold"))
+        self.lbl_playlist.pack(anchor="w", padx=20)
+        
+        self.playlist_frame = ctk.CTkScrollableFrame(self, height=150)
+        self.playlist_frame.pack(pady=5, fill="both", expand=True, padx=20)
+        self.atualizar_playlist()
+        
+        # 3. STATUS DA MÚSICA
+        self.lbl_status = ctk.CTkLabel(self, text="Player Pronto", font=("Arial", 14))
+        self.lbl_status.pack(pady=10)
+        
+        # 4. BOTÕES DE CONTROLO (⏮, ▶, ⏸, ⏹, ⏭)
+        self.frame_controles = ctk.CTkFrame(self, fg_color="transparent")
+        self.frame_controles.pack(pady=5)
+        
+        self.btn_prev = ctk.CTkButton(self.frame_controles, text="⏮", width=40, command=self.acionar_voltar)
+        self.btn_prev.pack(side="left", padx=5)
+        
+        self.btn_play = ctk.CTkButton(self.frame_controles, text="▶", width=40, command=self.player.tocar)
+        self.btn_play.pack(side="left", padx=5)
+        
+        self.btn_pause = ctk.CTkButton(self.frame_controles, text="⏸", width=40, command=self.player.pausar)
+        self.btn_pause.pack(side="left", padx=5)
+        
+        self.btn_stop = ctk.CTkButton(self.frame_controles, text="⏹", width=40, command=self.player.parar)
+        self.btn_stop.pack(side="left", padx=5)
+        
+        self.btn_skip = ctk.CTkButton(self.frame_controles, text="⏭", width=40, command=self.acionar_avancar)
+        self.btn_skip.pack(side="left", padx=5)
+        
+        # 5. CONTROLO DE VOLUME (Slider)
+        self.frame_vol = ctk.CTkFrame(self, fg_color="transparent")
+        self.frame_vol.pack(pady=15)
+        
+        self.lbl_vol = ctk.CTkLabel(self.frame_vol, text="Volume")
+        self.lbl_vol.pack(side="left", padx=5)
+        
+        self.slider_vol = ctk.CTkSlider(self.frame_vol, from_=0, to=1, command=self.mudar_volume)
+        self.slider_vol.set(0.5) # Começa nos 50%
+        self.slider_vol.pack(side="left", padx=5)
 
-        opcao = input("\nEscolha uma opção: ")
+    # --- Funções que conectam a interface ao motor ---
+    
+    def buscar_youtube(self):
+        busca = self.entry_yt.get()
+        if busca:
+            self.lbl_status.configure(text="A descarregar... Aguarde! (A janela pode congelar uns segundos)")
+            self.update() # Força a tela a atualizar antes de começar o download
+            
+            self.player.carregar_do_youtube(busca)
+            
+            self.lbl_status.configure(text="Download concluído! A tocar...")
+            self.atualizar_playlist()
+            self.entry_yt.delete(0, 'end')
 
-        if opcao == "1":
-            if not os.path.exists(pasta_padrao):
-                print(f"\n[ERRO] A pasta '{pasta_padrao}' não existe. Crie a pasta e coloque os seus MP3 nela.")
-                continue
+    def mudar_volume(self, valor):
+        pygame.mixer.music.set_volume(valor)
+        self.player.volume = valor
 
-            arquivos_mp3 = [arquivo for arquivo in os.listdir(pasta_padrao) if arquivo.endswith(".mp3")]
+    def atualizar_playlist(self):
+        # Limpa as músicas antigas da tela
+        for widget in self.playlist_frame.winfo_children():
+            widget.destroy()
+            
+        if os.path.exists("musica"):
+            arquivos = [f for f in os.listdir("musica") if f.endswith(".mp3")]
+            for arq in arquivos:
+                # Cria um botão invisível para cada música (para poderes clicar nela)
+                btn = ctk.CTkButton(self.playlist_frame, text=arq, anchor="w", fg_color="transparent", 
+                                    text_color="white", hover_color="#2ecc71", 
+                                    command=lambda m=arq: self.tocar_da_playlist(m))
+                btn.pack(fill="x", pady=2)
 
-            if not arquivos_mp3:
-                print(f"\n[AVISO] Nenhuma música encontrada na pasta '{pasta_padrao}'.")
-                continue
+    def tocar_da_playlist(self, nome_musica):
+        caminho = os.path.join("musica", nome_musica)
+        self.player.parar()
+        self.player.carregar_musica(caminho)
+        self.player.tocar()
+        self.lbl_status.configure(text=f"A tocar: {nome_musica}")
 
-            print("\n=== Biblioteca de Músicas ===")
-            for indice, arquivo in enumerate(arquivos_mp3):
-                print(f"{indice + 1} - {arquivo}")
-            print("0 - Cancelar e voltar")
+    def acionar_avancar(self):
+        self.player.avancar_musica()
+        if self.player.faixa_atual:
+            self.lbl_status.configure(text=f"A tocar: {os.path.basename(self.player.faixa_atual)}")
 
-            escolha_musica = input("\nDigite o número da música: ")
-
-            if escolha_musica.isdigit():
-                numero_escolhido = int(escolha_musica)
-                
-                if numero_escolhido == 0:
-                    continue 
-                elif 1 <= numero_escolhido <= len(arquivos_mp3):
-                    nome_arquivo = arquivos_mp3[numero_escolhido - 1]
-                    caminho_completo = os.path.join(pasta_padrao, nome_arquivo)
-                    player.carregar_musica(caminho_completo)
-                    player.tocar()
-                else:
-                    print("\n[ERRO] Número fora da lista.")
-            else:
-                print("\n[ERRO] Por favor, digite apenas números.")
-
-        elif opcao == "2":
-            busca = input("\nDigite o nome da música ou artista: ")
-            if busca.strip():
-                player.carregar_do_youtube(busca)
-            else:
-                print("\n[AVISO] A busca não pode estar vazia.")
-
-        elif opcao == "3":
-            player.tocar()
-        elif opcao == "4":
-            player.pausar()
-        elif opcao == "5":
-            player.retomar()
-        elif opcao == "6":
-            player.parar()
-        elif opcao == "7":
-            player.aumentar_volume()
-        elif opcao == "8":
-            player.diminuir_volume()
-        elif opcao == "0":
-            player.parar()
-            print("\nA encerrar a aplicação...")
-            break
-        else:
-            print("\n[ERRO] Opção inválida.")
+    def acionar_voltar(self):
+        self.player.voltar_musica()
+        if self.player.faixa_atual:
+            self.lbl_status.configure(text=f"A tocar: {os.path.basename(self.player.faixa_atual)}")
 
 if __name__ == "__main__":
-    menu_principal()
-    
+    app = InterfacePlayer()
+    app.mainloop()
